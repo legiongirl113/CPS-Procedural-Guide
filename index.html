@@ -1,0 +1,266 @@
+import React, { useState } from 'react';
+
+// --- API Configuration ---
+// The API key is left as an empty string; the environment will inject the key at runtime.
+const apiKey = ""; 
+const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+// Standard US State List (For the select dropdown)
+const states = [
+    { code: '', name: 'Select Your State' },
+    { code: 'AL', name: 'Alabama' }, { code: 'AK', name: 'Alaska' }, { code: 'AZ', name: 'Arizona' },
+    { code: 'AR', name: 'Arkansas' }, { code: 'CA', name: 'California' }, { code: 'CO', name: 'Colorado' },
+    { code: 'CT', name: 'Connecticut' }, { code: 'DE', name: 'Delaware' }, { code: 'FL', name: 'Florida' },
+    { code: 'GA', name: 'Georgia' }, { code: 'HI', name: 'Hawaii' }, { code: 'ID', name: 'Idaho' },
+    { code: 'IL', name: 'Illinois' }, { code: 'IN', name: 'Indiana' }, { code: 'IA', name: 'Iowa' },
+    { code: 'KS', name: 'Kansas' }, { code: 'KY', name: 'Kentucky' }, { code: 'LA', name: 'Louisiana' },
+    { code: 'ME', name: 'Maine' }, { code: 'MD', name: 'Maryland' }, { code: 'MA', name: 'Massachusetts' },
+    { code: 'MI', name: 'Michigan' }, { code: 'MN', name: 'Minnesota' }, { code: 'MS', name: 'Mississippi' },
+    { code: 'MO', name: 'Missouri' }, { code: 'MT', name: 'Montana' }, { code: 'NE', name: 'Nebraska' },
+    { code: 'NV', name: 'Nevada' }, { code: 'NH', name: 'New Hampshire' }, { code: 'NJ', name: 'New Jersey' },
+    { code: 'NM', name: 'New Mexico' }, { code: 'NY', name: 'New York' }, { code: 'NC', name: 'North Carolina' },
+    { code: 'ND', name: 'North Dakota' }, { code: 'OH', name: 'Ohio' }, { code: 'OK', name: 'Oklahoma' },
+    { code: 'OR', name: 'Oregon' }, { code: 'PA', name: 'Pennsylvania' }, { code: 'RI', name: 'Rhode Island' },
+    { code: 'SC', name: 'South Carolina' }, { code: 'SD', name: 'South Dakota' }, { code: 'TN', name: 'Tennessee' },
+    { code: 'TX', name: 'Texas' }, { code: 'UT', name: 'Utah' }, { code: 'VT', name: 'Vermont' },
+    { code: 'VA', name: 'Virginia' }, { code: 'WA', name: 'Washington' }, { code: 'WV', name: 'West Virginia' },
+    { code: 'WI', name: 'Wisconsin' }, { code: 'WY', name: 'Wyoming' }
+];
+
+// Function to handle API requests with exponential backoff for resilience
+const fetchWithBackoff = async (url, options, maxRetries = 5) => {
+    let delay = 1000;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(url, options);
+            if (response.status === 429 && i < maxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; 
+                continue;
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        } catch (error) {
+            console.error(`Attempt ${i + 1} failed:`, error);
+            if (i === maxRetries - 1) throw error;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2;
+        }
+    }
+};
+
+// --- Main Application Component ---
+const App = () => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedState, setSelectedState] = useState('');
+    const [definition, setDefinition] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [sources, setSources] = useState([]);
+
+    // System instruction updated for empathetic, supportive, and trauma-informed tone
+    const systemInstruction = {
+        parts: [{ 
+            text: `
+            You are a compassionate, neutral, and highly supportive guide specializing in US Family Court and Child Protective Services (CPS) procedures. Your goal is to simplify overwhelming legal processes and terminology for users who may be stressed or confused.
+            
+            **MANDATORY OUTPUT RULE:** 1. **DISCLAIMER:** You MUST start your response with the following exact sentence on its own line, formatted in bold: "**Please remember, this information is for procedural guidance and educational support only and does not constitute legal advice. For advice specific to your unique situation, it is crucial to consult with a licensed attorney in your state.**"
+            2. **TONE & SUPPORT:** Use a compassionate, non-judgmental, and encouraging tone. Acknowledge the complexity of the process.
+            3. **FOCUS:** Address the user's query by explaining the general steps, definitions, or common paperwork involved in a CPS case in the specified state.
+            4. **REFUSAL:** You MUST politely and empathetically refuse to interpret personal facts, judge the user's situation, or advise on legal strategy ("Should I do X?", "What should I tell the judge?"). If the query is case-specific, gently redirect the user to their attorney, a legal aid service, or the state's official website.
+            5. **ACCURACY:** Use Google Search grounding to cite sources for state-specific CPS procedures or forms.
+            `
+        }]
+    };
+
+    const handleSearch = async (e) => {
+        e.preventDefault();
+        if (!searchTerm.trim() || !selectedState) {
+            setError('Please select your State and enter your question so we can help.');
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+        setDefinition('');
+        setSources([]);
+
+        const fullStateName = states.find(s => s.code === selectedState)?.name;
+
+        const userQuery = `In the context of Child Protective Services and Family Court in ${fullStateName}, please explain or simplify the following: "${searchTerm.trim()}"`;
+
+        const payload = {
+            contents: [{ parts: [{ text: userQuery }] }],
+            tools: [{ "google_search": {} }], 
+            systemInstruction: systemInstruction,
+        };
+
+        const options = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        };
+
+        try {
+            const result = await fetchWithBackoff(apiUrl, options);
+            const candidate = result.candidates?.[0];
+
+            if (candidate && candidate.content?.parts?.[0]?.text) {
+                const generatedText = candidate.content.parts[0].text;
+                setDefinition(generatedText);
+
+                // Extract grounding sources
+                let extractedSources = [];
+                const groundingMetadata = candidate.groundingMetadata;
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    extractedSources = groundingMetadata.groundingAttributions
+                        .map(attribution => ({
+                            uri: attribution.web?.uri,
+                            title: attribution.web?.title,
+                        }))
+                        .filter(source => source.uri && source.title);
+                }
+                setSources(extractedSources);
+
+            } else {
+                setError('We apologize, but we were unable to retrieve the information or your query may be too specific to your personal case. Remember, we cannot offer legal advice. Please try a general question or consult your attorney.');
+            }
+        } catch (err) {
+            setError(`Connection issue: We failed to reach the guide engine. Please check your connection or try again later. (Error: ${err.message})`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-50 flex flex-col items-center p-4">
+            <div className="w-full max-w-4xl">
+                
+                {/* Header and Supportive Tone */}
+                <header className="text-center py-6">
+                    <h1 className="text-4xl font-extrabold text-indigo-800">Your Family Court & CPS Guide</h1>
+                    <p className="mt-2 text-xl text-gray-600">We're here to help you understand the process.</p>
+                </header>
+
+                {/* CRUCIAL LEGAL WARNING (Red for visibility) */}
+                <div className="p-4 mb-6 bg-red-100 border-l-4 border-red-600 rounded-xl shadow-xl">
+                    <h3 className="font-extrabold text-red-800 text-lg mb-1 flex items-center">
+                        <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.39 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        MANDATORY LEGAL WARNING
+                    </h3>
+                    <p className="text-sm text-red-700">
+                        **THIS TOOL PROVIDES SUPPORTIVE, EDUCATIONAL INFORMATION ONLY AND IS NOT A SUBSTITUTE FOR LEGAL ADVICE.** Your case is unique. **You must speak with a licensed attorney in your state** for case-specific guidance and legal strategy.
+                    </p>
+                </div>
+
+                {/* Search Form - Calm and Organized */}
+                <form onSubmit={handleSearch} className="mb-8 p-6 bg-white rounded-xl shadow-2xl space-y-5">
+                    
+                    <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
+                         {/* State Selector */}
+                        <div className="flex-1">
+                            <label htmlFor="state-select" className="block text-sm font-medium text-gray-700 mb-1">Step 1: Confirm Your State</label>
+                            <select
+                                id="state-select"
+                                value={selectedState}
+                                onChange={(e) => setSelectedState(e.target.value)}
+                                className="w-full p-3 border-2 border-indigo-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out bg-white"
+                                required
+                                disabled={loading}
+                            >
+                                {states.map(state => (
+                                    <option key={state.code} value={state.code}>{state.name}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">This ensures the information is relevant to your location.</p>
+                        </div>
+                    </div>
+
+                    {/* Question Input */}
+                    <div>
+                        <label htmlFor="search-term" className="block text-sm font-medium text-gray-700 mb-1">Step 2: Ask Your Question</label>
+                        <textarea
+                            id="search-term"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder='What is the purpose of a "Dispositional Hearing" in [State]? or Simplify the language in this section of my court form: [Paste term or phrase here].'
+                            className="w-full p-3 border-2 border-indigo-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out resize-vertical"
+                            rows="4"
+                            required
+                            disabled={loading}
+                        ></textarea>
+                        <p className="text-xs text-gray-500 mt-1">Focus on procedural terms, common documents, or court phases (e.g., "Adjudication," "Case Plan," "Pre-Trial Hearing").</p>
+                    </div>
+
+                    <button
+                        type="submit"
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition duration-150 ease-in-out disabled:opacity-50 active:scale-95"
+                        disabled={loading || !selectedState}
+                    >
+                        {loading ? 'Processing & Consulting Resources...' : 'Simplify the Legal Process'}
+                    </button>
+                </form>
+
+                {/* Loading, Error, and Results Display */}
+                <div className="p-6 bg-white rounded-xl shadow-lg min-h-80">
+                    {loading && (
+                        <div className="flex flex-col justify-center items-center h-full text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-500 border-solid"></div>
+                            <p className="mt-4 text-indigo-600 font-medium">We know this is stressful. We're gathering the simplest explanation for you now...</p>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="p-4 bg-red-100 text-red-700 rounded-lg border border-red-300">
+                            <p className="font-bold">Important Message:</p>
+                            <p>{error}</p>
+                        </div>
+                    )}
+
+                    {definition && (
+                        <>
+                            <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Procedural Guidance:</h2>
+                            <div className="prose max-w-none mb-6">
+                                {/* The AI's response, which includes the mandatory disclaimer */}
+                                <div dangerouslySetInnerHTML={{ __html: definition.replace(/\n/g, '<br/>') }} />
+                            </div>
+
+                            {/* Grounding Sources */}
+                            {sources.length > 0 && (
+                                <div className="mt-8 pt-4 border-t border-gray-200">
+                                    <h4 className="font-semibold text-gray-700 mb-2">Sources Consulted for Reference (Please Review Official Documents):</h4>
+                                    <ul className="list-disc list-inside text-sm space-y-1 text-gray-600">
+                                        {sources.map((source, index) => (
+                                            <li key={index}>
+                                                <a href={source.uri} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:text-indigo-700 transition">
+                                                    {source.title || source.uri}
+                                                </a>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {!loading && !error && !definition && (
+                        <div className="text-center py-10 text-gray-400">
+                            When you're ready, select your state and ask a question about the process.
+                        </div>
+                    )}
+                </div>
+
+                <div className="text-center mt-8 text-xs text-gray-400">
+                    *This is a free tool built using the Gemini API for educational purposes.*
+                </div>
+
+            </div>
+        </div>
+    );
+};
+
+export default App;
+
+          
