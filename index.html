@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 
 // --- API Configuration ---
-// The API key is left as an empty string; the environment will inject the key at runtime.
 const apiKey = ""; 
 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
@@ -26,6 +25,18 @@ const states = [
     { code: 'VA', name: 'Virginia' }, { code: 'WA', name: 'Washington' }, { code: 'WV', name: 'West Virginia' },
     { code: 'WI', name: 'Wisconsin' }, { code: 'WY', name: 'Wyoming' }
 ];
+
+// Helper to convert simple Markdown (line breaks) for display
+const renderMarkdown = (text) => {
+    if (!text) return { __html: '' };
+    // Simple conversion: replace double newlines with paragraph break, and single newlines with <br/>
+    let html = text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>');
+    // Wrap content in a paragraph tag if it doesn't already start with one
+    if (!html.startsWith('<p>')) {
+        html = '<p>' + html + '</p>';
+    }
+    return { __html: html };
+};
 
 // Function to handle API requests with exponential backoff for resilience
 const fetchWithBackoff = async (url, options, maxRetries = 5) => {
@@ -134,6 +145,8 @@ const App = () => {
         }
     };
 
+    const isButtonDisabled = loading || !selectedState;
+
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center p-4">
             <div className="w-full max-w-4xl">
@@ -158,24 +171,22 @@ const App = () => {
                 {/* Search Form - Calm and Organized */}
                 <form onSubmit={handleSearch} className="mb-8 p-6 bg-white rounded-xl shadow-2xl space-y-5">
                     
-                    <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
-                         {/* State Selector */}
-                        <div className="flex-1">
-                            <label htmlFor="state-select" className="block text-sm font-medium text-gray-700 mb-1">Step 1: Confirm Your State</label>
-                            <select
-                                id="state-select"
-                                value={selectedState}
-                                onChange={(e) => setSelectedState(e.target.value)}
-                                className="w-full p-3 border-2 border-indigo-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out bg-white"
-                                required
-                                disabled={loading}
-                            >
-                                {states.map(state => (
-                                    <option key={state.code} value={state.code}>{state.name}</option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">This ensures the information is relevant to your location.</p>
-                        </div>
+                    {/* State Selector */}
+                    <div className="w-full">
+                        <label htmlFor="state-select" className="block text-sm font-medium text-gray-700 mb-1">Step 1: Confirm Your State</label>
+                        <select
+                            id="state-select"
+                            value={selectedState}
+                            onChange={(e) => setSelectedState(e.target.value)}
+                            className="w-full p-3 border-2 border-indigo-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out bg-white"
+                            required
+                            disabled={loading}
+                        >
+                            {states.map(state => (
+                                <option key={state.code} value={state.code} disabled={state.code === ''}>{state.name}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">This ensures the information is relevant to your location.</p>
                     </div>
 
                     {/* Question Input */}
@@ -185,7 +196,7 @@ const App = () => {
                             id="search-term"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder='What is the purpose of a "Dispositional Hearing" in [State]? or Simplify the language in this section of my court form: [Paste term or phrase here].'
+                            placeholder='Example: "What is the purpose of a Status Hearing in [State]? or Simplify the meaning of Adjudication Hearing."'
                             className="w-full p-3 border-2 border-indigo-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out resize-vertical"
                             rows="4"
                             required
@@ -196,11 +207,22 @@ const App = () => {
 
                     <button
                         type="submit"
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg shadow-lg transition duration-150 ease-in-out disabled:opacity-50 active:scale-95"
-                        disabled={loading || !selectedState}
+                        className={`w-full font-semibold py-3 px-6 rounded-lg shadow-lg transition duration-150 ease-in-out active:scale-95 ${isButtonDisabled 
+                            ? 'bg-gray-400 text-gray-700 cursor-not-allowed' 
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                        disabled={isButtonDisabled}
                     >
-                        {loading ? 'Processing & Consulting Resources...' : 'Simplify the Legal Process'}
+                        {loading 
+                            ? 'Processing & Consulting Resources...' 
+                            : selectedState === '' 
+                                ? 'Select State Above to Enable Search'
+                                : 'Simplify the Legal Process'}
                     </button>
+                    {isButtonDisabled && !loading && selectedState === '' && (
+                        <p className="text-center text-sm text-red-500 font-medium mt-2">
+                            Please select your state to proceed.
+                        </p>
+                    )}
                 </form>
 
                 {/* Loading, Error, and Results Display */}
@@ -223,8 +245,9 @@ const App = () => {
                         <>
                             <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Procedural Guidance:</h2>
                             <div className="prose max-w-none mb-6">
+                                {Image of Child Protective Services Case Flowchart]
                                 {/* The AI's response, which includes the mandatory disclaimer */}
-                                <div dangerouslySetInnerHTML={{ __html: definition.replace(/\n/g, '<br/>') }} />
+                                <div dangerouslySetInnerHTML={renderMarkdown(definition)} />
                             </div>
 
                             {/* Grounding Sources */}
@@ -247,13 +270,13 @@ const App = () => {
 
                     {!loading && !error && !definition && (
                         <div className="text-center py-10 text-gray-400">
-                            When you're ready, select your state and ask a question about the process.
+                            When you're ready, select your state and ask a general question about the process.
                         </div>
                     )}
                 </div>
 
                 <div className="text-center mt-8 text-xs text-gray-400">
-                    *This is a free tool built using the Gemini API for educational purposes.*
+                    *This is a free tool built using the Gemini API for educational purposes. App ID: {typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'}*
                 </div>
 
             </div>
@@ -263,4 +286,4 @@ const App = () => {
 
 export default App;
 
-          
+            
